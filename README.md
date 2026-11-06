@@ -73,6 +73,8 @@ Update checks read the latest stable release in `chipset/Meeting-Busy` on GitHub
 
 ### Troubleshooting a missed meeting
 
+Version 0.4.4 fixes missed native Teams calls when Teams exposes only its window buttons through Accessibility. Meeting Busy now requests Teams' embedded WebView accessibility tree before scanning, so its call controls can become readable on subsequent checks. This does not require restarting Teams or leaving the call. Native Teams detection still requires Accessibility permission.
+
 Open **Settings… → Meeting detection → Detection details**. This shows the running app's version and path, Accessibility permission, application IDs, readable window/control counts, and scan failures. It does not include meeting titles or chat text. Zero controls or Accessibility errors indicate the app cannot inspect the client; zero meeting matches with readable controls indicates the client's UI does not match the current rules.
 
 After updating an ad hoc signed build, first reopen Meeting Busy and check Accessibility status in Settings. If access is denied, quit, remove its old entry from System Settings → Privacy & Security → Accessibility, add the updated `dist/Meeting Busy.app`, enable it, and reopen that copy. Confirm **Automatic** is selected and **I’m presenting** is off. While troubleshooting, Force Busy provides a manual indicator.

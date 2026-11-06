@@ -1,9 +1,14 @@
-# Meeting Busy 0.4.3
+# Meeting Busy 0.4.4
 
-Small preview update to 0.4.2. A real Safari meeting and own-sharing check is still outstanding (see MANUAL_TESTS.md).
+Fixes missed Microsoft Teams calls when Teams exposes its window buttons but keeps its embedded meeting controls inaccessible.
 
-- **Grant Accessibility access…** now shows either the macOS permission dialog or System Settings, not both. The first request shows the system dialog (which also lists the app under Accessibility); later requests open the Accessibility pane directly.
+- Meeting Busy now requests Teams' WebView accessibility tree before scanning. Once Teams exposes its controls, Automatic mode can detect the call on a subsequent check without restarting Teams or leaving the meeting.
+- Updated the README with the cause and recovery behavior. The app and all browser-extension packages are version 0.4.4 (app build 22).
 
-Everything in 0.4.2 is included: automatic Safari pairing with an Allow prompt, right-click hide options on the indicator, detection parity fixes, and the extension-stopped-reporting status. Safari removes temporary extensions on quit or after 24 hours; pair again with **Pair automatically** when needed.
+Observed live on Apple Silicon with macOS 26.6.2 and Teams 26289.204.5281.6363: before the accessibility requests, Teams exposed 40 elements, six window controls, and no meeting match. After the requests, the diagnostic found 267 elements, 32 controls, and an active Teams call; the running app logged the meeting in Automatic mode. This verifies recovery for that call, not the full meeting and sharing lifecycle.
 
-This is an ad hoc signed preview, not notarized, and requires no paid Apple Developer account. After an update macOS may ask for Accessibility access again; only repair it if the app reports access denied. Intel Macs and older Safari versions have not been verified.
+Validation: 66 Swift tests, 24 browser-extension tests, and native-host/Safari-handler integration checks passed. The app, browser host, and Safari extension build for both Apple Silicon and Intel; packaged signatures and release checksums were verified.
+
+Includes the earlier 0.4.x Safari pairing, indicator hide options, and Accessibility permission-prompt fixes. Live Safari meeting and own-sharing checks remain outstanding; Intel runtime behavior and older Safari versions have not been verified. See MANUAL_TESTS.md.
+
+This is an ad hoc signed preview and is not notarized. After updating, macOS may require Accessibility approval again; repair permission only if the app reports access denied. Safari temporary extensions need pairing again after an app update.

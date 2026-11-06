@@ -1,6 +1,6 @@
 # Manual acceptance checks
 
-Automated tests cover detection rules, stale evidence, timer expiry, appearance persistence and placement, release versions/URLs, and diagnostic log rotation. The live-client checks below require a person with Accessibility permission and actual meeting clients. They have not been completed by the restricted development tool session.
+Automated tests cover detection rules, stale evidence, timer expiry, appearance persistence and placement, release versions/URLs, and diagnostic log rotation. The live-client checks below require Accessibility permission and actual meeting clients. The full checklist remains outstanding; individual observations are recorded separately below.
 
 For each run, record the app version, macOS version, processor, browser/client version, and pass/fail result. Start in Automatic with previews off. Use Every scan logging temporarily if investigating a failure, then return to State changes or Off.
 
@@ -23,6 +23,12 @@ Repeat with native Zoom, native Teams, native Webex, and browser Google Meet. Al
 | Quit the meeting client | Indicator clears after the next scan. |
 
 For a hang/read-error scenario, the last positive result must expire rather than keeping Busy visible indefinitely. A new successful result may show the indicator again. Revoking Accessibility must clear detected evidence and report Setup needed.
+
+### Native Teams accessibility recovery (0.4.4)
+
+On a fresh Teams launch, join a call without using another accessibility inspector first. Confirm Automatic detects it even when Teams initially exposes only window chrome. Then leave and rejoin, mute/unmute, and start/stop your own sharing; verify the normal lifecycle behavior above. Repeat after restarting Teams and Meeting Busy, without restarting or interrupting the live call to recover detection.
+
+Observed on 2026-11-06, Apple Silicon, macOS 26.6.2, Teams 26289.204.5281.6363, Meeting Busy 0.4.3 (build 21): Teams exposed 40 elements and six window controls with zero meeting matches. A diagnostic probe requested AXManualAccessibility and AXEnhancedUserInterface on Teams and its WebView helpers. The main process then exposed 267 elements and 32 controls, and the diagnostic detected an active call. The running app logged Microsoft Teams in Automatic mode. Version 0.4.4 adds these requests to the main Teams process before each scan; fresh-launch recovery and the full leave/share lifecycle still need verification with that packaged build.
 
 ## Manual modes and reminders
 

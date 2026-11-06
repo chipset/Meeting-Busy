@@ -47,8 +47,14 @@ enum AccessibilityScanner {
             guard native != nil || browserIDs.contains(target.bundleID) else { continue }
             let app = AXUIElementCreateApplication(target.pid)
             AXUIElementSetMessagingTimeout(app, 0.12)
-            if browserIDs.contains(target.bundleID) {
+            if browserIDs.contains(target.bundleID) || native == .teams {
                 _ = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            }
+            if native == .teams {
+                // Teams can expose only its native window chrome until its WebView
+                // accessibility tree is requested. These are best-effort requests:
+                // Teams may populate the tree asynchronously even if a setter fails.
+                _ = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
             }
             var windowsRef: CFTypeRef?
             let error = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windowsRef)

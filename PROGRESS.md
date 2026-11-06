@@ -1,18 +1,18 @@
 # Project progress and resume notes
 
-Last updated: 2026-10-30. Repo: https://github.com/chipset/Meeting-Busy (local: `~/source/meeting-busy`).
+Last updated: 2026-11-06. Repo: https://github.com/chipset/Meeting-Busy (local: `~/source/meeting-busy`).
 
 ## Current state
 
-- **Latest release: 0.4.3 (build 21)**, published as a GitHub *prerelease* (not marked latest): https://github.com/chipset/Meeting-Busy/releases/tag/v0.4.3. Tags `v0.4.2` and `v0.4.3` are pushed.
+- **Current release: 0.4.4 (build 22)**. Release destination: https://github.com/chipset/Meeting-Busy/releases/tag/v0.4.4. Keep it a GitHub *prerelease* (not marked latest), consistent with the 0.4.x previews; verify publication and assets at that link when resuming.
 - `/Applications/Meeting Busy.app` is the 0.4.3 build taken from the published ZIP. `~/Applications/Meeting Busy.app` was removed.
-- `main` is pushed and is the source of truth. CI is defined in `.github/workflows/ci.yml` (macOS runner: `swift test` plus `node --test BrowserExtension/tests/*.test.cjs`) but **has never run on GitHub**; check the Actions tab after the first push.
+- `main` is the source of truth. CI is defined in `.github/workflows/ci.yml` (macOS runner: `swift test` plus `node --test BrowserExtension/tests/*.test.cjs`). GitHub CI passed for 0.4.2, 0.4.3, and the previous progress-notes commit; check the Actions tab for 0.4.4 after pushing.
 
 ## Branches
 
 | Branch | Commit | Status |
 | --- | --- | --- |
-| `main` | 37852ad (Release 0.4.3) | Pushed. Work here. |
+| `main` | Release 0.4.4; use `git log -1` for its commit | Work here. |
 | `feature/usb-indicator-light` | ce9351c | **Unmerged.** Optional USB indicator light (RP2040 + WS2812). Pushed as a backup branch only. |
 | `improvements/reliability-and-pairing` | 7e2c80a | Fully merged into `main`. Redundant; safe to delete (`git branch -d`). Not pushed. |
 
@@ -26,6 +26,8 @@ The feature branch forks from 7e2c80a, is 1 commit ahead and 4 behind `main`. Me
 - Reliability: snapshot pruning (300 s), in-process notification on Safari updates, adaptive Accessibility scan interval (6 s when idle and bridge connected), single-instance handoff (second launch opens Settings in the running one).
 - UI: right-click on the indicator offers Hide for 15 minutes / 1 hour / until Automatic (plus VoiceOver action).
 - 0.4.3 fix: "Grant Accessibility access…" shows the system dialog the first time only, then opens System Settings.
+- 0.4.4 fix: request AXManualAccessibility and AXEnhancedUserInterface on native Teams before reading windows. A live Teams call initially exposed only 40 elements/six window controls; accessibility requests restored 267 elements/32 controls, a meeting match, and the running app's Automatic meeting state. Full fresh-launch/leave/share acceptance remains outstanding; see MANUAL_TESTS.md. The installed `/Applications` copy remains 0.4.3 until explicitly updated.
+- 0.4.4 release validation: 66 Swift tests and 24 browser-extension tests passed, along with real native-host and sandboxed Safari-handler checks. The universal app, browser host, and Safari extension each contain arm64 and x86_64 slices; deep signature verification passed. Release assets are the universal app ZIP and Chromium, Firefox, and Safari temporary-extension ZIPs, each with a SHA-256 checksum. Builds remain ad hoc signed and not notarized.
 
 ## USB indicator light (feature branch)
 
@@ -42,7 +44,7 @@ The feature branch forks from 7e2c80a, is 1 commit ahead and 4 behind `main`. Me
 2. Fresh-install Accessibility behaviour (0.4.3 fix) is untested. To test: `tccutil reset Accessibility local.meetingbusy` and `defaults delete local.meetingbusy didRequestAccessibilityPrompt`, then choose Grant Accessibility twice (expect dialog only, then Settings only).
 3. The embedded Safari native extension (appex) is never listed by Safari; the temporary-extension route is the workaround. Root cause is unsolved (likely signing: ad hoc build).
 4. Stable signing: a self-signed certificate (so Accessibility consent survives updates) needs a decision on key handling; free Apple ID dev signing is unproven. No notarization.
-5. Decide whether to promote 0.4.3 from prerelease to stable (`gh release edit v0.4.3 --prerelease=false --latest`).
+5. Complete preview acceptance before deciding whether to promote 0.4.4 from prerelease to stable (`gh release edit v0.4.4 --prerelease=false --latest`).
 6. Delete the redundant `improvements/reliability-and-pairing` branch.
 7. `dist/AGENT_HANDOFF.txt` (gitignored) is stale; it describes 0.4.1.
 
