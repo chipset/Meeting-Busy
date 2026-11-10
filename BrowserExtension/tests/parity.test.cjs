@@ -24,3 +24,11 @@ test('Swift and JavaScript detectors share the same phrase lists', () => {
   assert.deepEqual(sorted(rules.localizedLeave), sorted(swiftList('localizedLeave')));
   assert.deepEqual(sorted(rules.localizedStopSharing), sorted(swiftList('localizedStopSharing')));
 });
+test('Swift detector uses every mirrored phrase list it declares', () => {
+  // A declared-but-unused list would pass the comparison above while evaluate() drifts.
+  for (const name of ['meetEnd', 'teamsEnd', 'webexEnd', 'zoomEnd', 'stopSharing', 'teamsLeaveCompanions',
+    'zoomLeaveCompanions', 'endedAny', 'endedZoom', 'localizedLeave', 'localizedStopSharing']) {
+    const uses = swift.match(new RegExp(`\\b${name}\\b`, 'g')) || [];
+    assert.ok(uses.length >= 2, `Detection.swift declares ${name} but never uses it`);
+  }
+});

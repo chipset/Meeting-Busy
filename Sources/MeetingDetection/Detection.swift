@@ -60,6 +60,11 @@ public enum Detection {
     private static let zoomLeaveCompanions = ["mute", "unmute", "mute audio", "unmute audio", "mute my audio", "unmute my audio", "start video", "stop video", "join audio", "audio", "video"]
     private static let endedAny = ["rejoin", "return to home", "back to home"]
     private static let endedZoom = ["join a meeting", "new meeting"]
+    // Native-only Zoom signals (window title, toolbar, menu). The browser extension has no
+    // equivalent, so these are deliberately not mirrored in detector.js.
+    private static let zoomToolbarLabels = ["participants", "reactions", "share screen", "share", "meeting info"]
+    private static let zoomPrejoin = ["join", "join meeting", "join now", "join webinar"]
+    private static let zoomMenuCompanions = ["mute", "unmute", "start video", "stop video", "join audio"]
 
     public static func nativeService(bundleID: String) -> MeetingService? {
         switch bundleID.lowercased() {
@@ -98,22 +103,22 @@ public enum Detection {
         // Teams also labels its call button simply “Leave”; require a companion
         // call control to avoid treating a team/channel's Leave menu as a call.
         let teamsCall = service == .teams && labels.contains(where: { matches($0, phrases: ["leave"]) })
-            && labels.contains(where: { matches($0, phrases: ["mute", "unmute", "turn camera on", "turn camera off", "camera", "mic", "microphone"]) })
+            && labels.contains(where: { matches($0, phrases: teamsLeaveCompanions) })
         // Zoom's host button is “End”, and participants may see “Leave”.
         // Require an audio/video control alongside these otherwise ambiguous labels.
         let zoomCall = service == .zoom && labels.contains(where: { matches($0, phrases: ["end", "leave"]) })
-            && labels.contains(where: { matches($0, phrases: ["mute", "unmute", "mute audio", "unmute audio", "mute my audio", "unmute my audio", "start video", "stop video", "join audio", "audio", "video"]) })
+            && labels.contains(where: { matches($0, phrases: zoomLeaveCompanions) })
         let title = windowTitle?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let zoomWindow = title == "zoom meeting" || title == "zoom webinar" || title.hasPrefix("zoom meeting - ")
-        let zoomToolbarCount = ["participants", "reactions", "share screen", "share", "meeting info"].filter { phrase in
+        let zoomToolbarCount = zoomToolbarLabels.filter { phrase in
             labels.contains(where: { matches($0, phrases: [phrase]) })
         }.count
-        let prejoin = labels.contains(where: { matches($0, phrases: ["join", "join meeting", "join now", "join webinar"]) })
+        let prejoin = labels.contains(where: { matches($0, phrases: zoomPrejoin) })
         let zoomToolbar = service == .zoom && zoomWindow && zoomToolbarCount >= 2 && !prejoin
         // Menu commands may linger after leaving. They only corroborate an actual meeting window.
         let menuLabels = menuControls.filter(\.actionable).map(\.label)
         let zoomMenu = service == .zoom && zoomWindow && !prejoin
-            && (zoomToolbarCount > 0 || labels.contains(where: { matches($0, phrases: ["mute", "unmute", "start video", "stop video", "join audio"]) }))
+            && (zoomToolbarCount > 0 || labels.contains(where: { matches($0, phrases: zoomMenuCompanions) }))
             && menuLabels.contains(where: { matches($0, phrases: endControls) })
         // "New meeting" and "Join a meeting" are only post-call buttons in Zoom; Teams and Meet
         // show similar buttons on screens that remain visible during a live call.

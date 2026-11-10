@@ -70,15 +70,19 @@ api.runtime.onConnect.addListener(port => {
   port.postMessage({type: "policy", policy});
   connectNative();
 });
-api.tabs.onRemoved.addListener(tabID => {
-  for (const id of documents.keys()) if (id.startsWith(`${tabID}:`)) documents.delete(id);
+// Disconnect as well as forget: a content script whose port stays open would otherwise keep
+// posting into an entry that no longer exists. Same-document (SPA) navigations can report
+// status "loading" while the page lives on; the disconnect makes its content script reconnect.
+function forgetTab(tabID) {
+  for (const [id, document] of documents) {
+    if (!id.startsWith(`${tabID}:`)) continue;
+    documents.delete(id);
+    try { document.port.disconnect(); } catch (_) {}
+  }
   sendSnapshot();
-});
-api.tabs.onUpdated.addListener((tabID, change) => {
-  if (change.status !== "loading") return;
-  for (const id of documents.keys()) if (id.startsWith(`${tabID}:`)) documents.delete(id);
-  sendSnapshot();
-});
+}
+api.tabs.onRemoved.addListener(tabID => forgetTab(tabID));
+api.tabs.onUpdated.addListener((tabID, change) => { if (change.status === "loading") forgetTab(tabID); });
 async function connectOpenTabs() {
   const manifest = api.runtime.getManifest();
   const patterns = manifest.host_permissions || manifest.permissions.filter(value => value.startsWith("https://"));

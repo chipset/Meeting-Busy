@@ -14,3 +14,22 @@ jobs:
         run: swift test
       - name: Browser extension tests
         run: node --test BrowserExtension/tests/*.test.cjs
+  package:
+    # Catches release-only breakage (universal lipo, Safari appex, extension ZIPs) before release day.
+    runs-on: macos-15
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+      - name: Package app (ad hoc signed, not notarized)
+        run: ./scripts/package-release.sh
+      - name: Package browser extensions
+        run: ./scripts/package-browser-extensions.sh
+      - name: Exercise packaged native host
+        run: python3 scripts/test-browser-host.py
+      - name: Verify universal binaries and signature
+        run: |
+          test "$(lipo -archs "dist/Meeting Busy.app/Contents/MacOS/MeetingBusy" | tr ' ' '\n' | sort | xargs)" = "arm64 x86_64"
+          test "$(lipo -archs "dist/Meeting Busy.app/Contents/MacOS/MeetingBusyBrowserHost" | tr ' ' '\n' | sort | xargs)" = "arm64 x86_64"
+          codesign --verify --deep --strict "dist/Meeting Busy.app"

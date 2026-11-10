@@ -21,10 +21,29 @@ enum AccessibilityScanner {
         "com.microsoft.edgemac", "org.mozilla.firefox", "com.brave.Browser", "company.thebrowser.Browser"
     ]
 
+    /// Running native clients for enabled services, plus supported browsers (which may host any service).
+    static func runningTargets(enabledServices: Set<MeetingService>) -> [ApplicationTarget] {
+        NSWorkspace.shared.runningApplications.compactMap { app in
+            guard let id = app.bundleIdentifier,
+                  Detection.nativeService(bundleID: id).map({ enabledServices.contains($0) }) ?? browserIDs.contains(id) else { return nil }
+            return ApplicationTarget(pid: app.processIdentifier, bundleID: id)
+        }
+    }
+
+    /// Accessibility IPC blocks for up to several seconds per app. Run it on a dedicated queue
+    /// so it never ties up Swift concurrency's small cooperative thread pool.
+    private static let scanQueue = DispatchQueue(label: "local.meetingbusy.accessibility-scan", qos: .utility, attributes: .concurrent)
+
+    private static func scanOffPool(_ targets: [ApplicationTarget], enabledServices: Set<MeetingService>) async -> ScanResult {
+        await withCheckedContinuation { continuation in
+            scanQueue.async { continuation.resume(returning: scan(targets, enabledServices: enabledServices)) }
+        }
+    }
+
     static func scanConcurrently(_ targets: [ApplicationTarget], enabledServices: Set<MeetingService> = Set(MeetingService.allCases)) async -> ScanResult {
         guard !targets.isEmpty else { return scan([], enabledServices: enabledServices) }
         return await withTaskGroup(of: ScanResult.self) { group in
-            for target in targets { group.addTask { scan([target], enabledServices: enabledServices) } }
+            for target in targets { group.addTask { await scanOffPool([target], enabledServices: enabledServices) } }
             var result = ScanResult()
             for await partial in group {
                 result.evidence += partial.evidence
@@ -68,13 +87,14 @@ enum AccessibilityScanner {
             var controlsRead = 0
             var nodesRead = 0
             var menuControls: [Control] = []
+            // One budget per app, including Zoom's menu walk, so a slow app cannot exceed it.
+            let appDeadline = Date().addingTimeInterval(native == .zoom ? 3.5 : 2)
             // Menu commands only corroborate a live meeting window; they never start a call alone.
             if native == .zoom, let menu = attribute(app, kAXMenuBarAttribute), CFGetTypeID(menu) == AXUIElementGetTypeID() {
                 let element = unsafeDowncast(menu, to: AXUIElement.self)
-                menuControls = walk(element, service: .zoom, title: nil, deadline: Date().addingTimeInterval(0.9),
+                menuControls = walk(element, service: .zoom, title: nil, deadline: min(appDeadline, Date().addingTimeInterval(0.9)),
                      allowMenuItems: true, controlsRead: &controlsRead, nodesRead: &nodesRead, result: &result, enabledServices: enabledServices)
             }
-            let appDeadline = Date().addingTimeInterval(native == .zoom ? 3.5 : 2)
             for window in windows {
                 guard Date() < appDeadline else { result.incomplete = true; break }
                 let title = native == .zoom ? attribute(window, kAXTitleAttribute) as? String : nil

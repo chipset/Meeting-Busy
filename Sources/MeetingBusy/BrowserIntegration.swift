@@ -50,9 +50,7 @@ final class BrowserBridgeController: ObservableObject {
         do { try store.writePolicy(policy) }
         catch { configuration = nil; status = "Local browser bridge storage is unavailable."; return }
         if enabled, safariServer == nil {
-            if let url = Bundle.main.resourceURL?.appendingPathComponent("SafariBridge.json"),
-               let data = try? Data(contentsOf: url),
-               let settings = try? JSONDecoder().decode(SafariBridgeConfiguration.self, from: data) {
+            if let settings = Self.safariConfiguration {
                 do {
                     pairing.onPrompt = { [weak self] origin in Task { @MainActor in self?.confirmPairing(origin: origin) } }
                     safariServer = try SafariBridgeServer(configuration: settings, pairingToken: pairingToken, pairing: pairing, store: store, onStatus: { [weak self] message in
@@ -79,12 +77,24 @@ final class BrowserBridgeController: ObservableObject {
         return evidence
     }
 
-    private var pairingToken: String? { SafariPairingToken.loadOrCreate(directory: store.directory) }
+    /// Loaded on first successful use; a failed load is retried so a transient disk error is not cached.
+    private var cachedPairingToken: String?
+    private var pairingToken: String? {
+        if cachedPairingToken == nil { cachedPairingToken = SafariPairingToken.loadOrCreate(directory: store.directory) }
+        return cachedPairingToken
+    }
+
+    /// The build-time bridge port and native-handler token, bundled by the packaging scripts.
+    private static let safariConfiguration: SafariBridgeConfiguration? = {
+        guard let url = Bundle.main.resourceURL?.appendingPathComponent("SafariBridge.json"),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(SafariBridgeConfiguration.self, from: data)
+    }()
 
     private func confirmPairing(origin: String) {
         let alert = NSAlert()
         alert.messageText = "Allow a Safari extension to connect?"
-        alert.informativeText = "A Safari extension asked to send meeting and screen-sharing state to Meeting Busy. Allow it only if you just added “Meeting Busy (Temporary)” in Safari yourself.\n\nExtension ID: \(origin.replacingOccurrences(of: "safari-web-extension://", with: ""))"
+        alert.informativeText = "A Safari extension asked to send meeting and screen-sharing state to Meeting Busy. Allow it only if you just chose Pair automatically in the “Meeting Busy (Temporary)” extension popup yourself. If you did not, choose Don’t Allow.\n\nExtension ID: \(origin.replacingOccurrences(of: "safari-web-extension://", with: ""))"
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Don’t Allow")
         NSApp.activate(ignoringOtherApps: true)
@@ -141,7 +151,7 @@ final class BrowserBridgeController: ObservableObject {
         }
         do {
             let manager = FileManager.default
-            try manager.createDirectory(at: installedExtension, withIntermediateDirectories: true)
+            try manager.createDirectory(at: installedExtension, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             for file in try manager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil) {
                 let destination = installedExtension.appendingPathComponent(file.lastPathComponent)
                 if manager.fileExists(atPath: destination.path) { try manager.removeItem(at: destination) }
@@ -153,10 +163,7 @@ final class BrowserBridgeController: ObservableObject {
     }
 
     func copySafariPairingCode() {
-        guard let url = Bundle.main.resourceURL?.appendingPathComponent("SafariBridge.json"),
-              let data = try? Data(contentsOf: url),
-              let settings = try? JSONDecoder().decode(SafariBridgeConfiguration.self, from: data),
-              let token = pairingToken else {
+        guard let settings = Self.safariConfiguration, let token = pairingToken else {
             setupStatus = "This build has no Safari pairing configuration."; return
         }
         NSPasteboard.general.clearContents()

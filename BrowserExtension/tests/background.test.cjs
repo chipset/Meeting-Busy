@@ -31,12 +31,23 @@ test('closing or navigating a tab clears its state',()=>{
   p.onMessage.emit({type:'state',service:'Google Meet',inMeeting:true,presenting:false});
   w.tabs.onUpdated.emit(1,{status:'loading'});
   assert.equal(w.last().states.length,0);
+  // The stale port is closed so a surviving (same-document) content script reconnects.
+  assert.equal(p.disconnected,true);
   p.onMessage.emit({type:'state',service:'Google Meet',inMeeting:true,presenting:false});
   assert.equal(w.last().states.length,0);
   const second=w.connect(2);
   second.onMessage.emit({type:'state',service:'Google Meet',inMeeting:true,presenting:false});
   w.tabs.onRemoved.emit(2);
   assert.equal(w.last().states.length,0);
+});
+test('a same-document navigation reconnects and reports again',()=>{
+  const w=worker(),p=w.connect();
+  p.onMessage.emit({type:'state',service:'Google Meet',inMeeting:true,presenting:false});
+  w.tabs.onUpdated.emit(1,{status:'loading'});
+  assert.equal(p.disconnected,true);
+  const again=w.connect();
+  again.onMessage.emit({type:'state',service:'Google Meet',inMeeting:true,presenting:false});
+  assert.deepEqual(w.last().states,[{id:'1:0',service:'Google Meet',inMeeting:true,presenting:false}]);
 });
 test('pausing and service switches stop cached positives and require a fresh state',()=>{
   const w=worker(),p=w.connect();

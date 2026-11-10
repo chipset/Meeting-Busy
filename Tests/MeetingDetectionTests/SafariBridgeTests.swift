@@ -3,6 +3,27 @@ import Foundation
 @testable import MeetingDetection
 
 final class SafariBridgeTests: XCTestCase, @unchecked Sendable {
+    func testBridgeRetriesAfterThePortIsReleased() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = BrowserBridgeStore(directory: directory)
+        let configuration = SafariBridgeConfiguration(port: UInt16.random(in: 51000...61000), token: String(repeating: "a", count: 64))
+        let firstReady = expectation(description: "first listener ready")
+        let first = try SafariBridgeServer(configuration: configuration, store: store) { if $0.contains("is ready") { firstReady.fulfill() } }
+        await fulfillment(of: [firstReady], timeout: 5)
+        let retrying = expectation(description: "second listener retries")
+        retrying.assertForOverFulfill = false
+        let secondReady = expectation(description: "second listener recovers")
+        let second = try SafariBridgeServer(configuration: configuration, store: store) { status in
+            if status.contains("retrying") { retrying.fulfill() }
+            if status.contains("is ready") { secondReady.fulfill() }
+        }
+        defer { second.stop() }
+        await fulfillment(of: [retrying], timeout: 5)
+        first.stop()
+        await fulfillment(of: [secondReady], timeout: 10)
+    }
+
     func testLoopbackBridgeValidatesAuthenticationAndHonorsPolicy() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -91,14 +91,20 @@ public enum SafariPairingToken {
 /// The sandboxed Safari app extension forwards native messages over loopback.
 /// A per-build random token stays in the native bundles, never in webpage scripts.
 public final class SafariBridgeServer: @unchecked Sendable {
-    private let listener: NWListener
     private let queue = DispatchQueue(label: "local.meetingbusy.safari-bridge")
     private let configuration: SafariBridgeConfiguration
+    private let port: NWEndpoint.Port
     private let store: BrowserBridgeStore
     private let pairingToken: String?
     private let pairing: SafariPairingCoordinator?
+    private let onStatus: @Sendable (String) -> Void
     private let onUpdate: @Sendable () -> Void
-    private var active = 0 // confined to queue
+    // Confined to queue.
+    private var listener: NWListener?
+    private var active = 0
+    private var stopped = false
+    private var retryDelay: TimeInterval = 0
+    public static let maximumRetryDelay: TimeInterval = 60
 
     /// `configuration.token` authenticates the native Safari handler (requests without an Origin).
     /// Extension pages (a Safari-extension Origin) must use the per-install `pairingToken`.
@@ -107,15 +113,26 @@ public final class SafariBridgeServer: @unchecked Sendable {
                 onUpdate: @escaping @Sendable () -> Void = {}) throws {
         guard SafariPairingToken.isValid(configuration.token), pairingToken.map(SafariPairingToken.isValid) ?? true,
               let port = NWEndpoint.Port(rawValue: configuration.port) else { throw CocoaError(.coderInvalidValue) }
-        self.configuration = configuration; self.store = store
-        self.pairingToken = pairingToken; self.pairing = pairing; self.onUpdate = onUpdate
+        self.configuration = configuration; self.port = port; self.store = store
+        self.pairingToken = pairingToken; self.pairing = pairing; self.onStatus = onStatus; self.onUpdate = onUpdate
+        let listener = try makeListener()
+        queue.sync { self.listener = listener }
+        listener.start(queue: queue)
+    }
+
+    private func makeListener() throws -> NWListener {
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: port)
-        listener = try NWListener(using: parameters)
-        listener.stateUpdateHandler = { state in
+        let listener = try NWListener(using: parameters)
+        listener.stateUpdateHandler = { [weak self, weak listener] state in
+            guard let self, let listener else { return }
             switch state {
-            case .ready: onStatus("Safari bridge is ready on this Mac.")
-            case .failed: onStatus("Safari bridge could not start. Quit other copies of Meeting Busy, then toggle browser integration off and on.")
+            case .ready:
+                self.retryDelay = 0
+                self.onStatus("Safari bridge is ready on this Mac.")
+            case .failed:
+                listener.cancel()
+                self.scheduleRestart(replacing: listener)
             default: break
             }
         }
@@ -127,10 +144,34 @@ public final class SafariBridgeServer: @unchecked Sendable {
                                                  onUpdate: self.onUpdate, onClose: { [weak self] in self?.active -= 1 })
             request.start()
         }
-        listener.start(queue: queue)
+        return listener
     }
-    public func stop() { listener.cancel() }
-    deinit { listener.cancel() }
+
+    /// A failed listener cannot be restarted, and the port may only be briefly busy (for example
+    /// just after a crash). Replace it with exponential backoff instead of waiting for the user.
+    private func scheduleRestart(replacing failed: NWListener) {
+        guard !stopped, listener === failed else { return }
+        listener = nil
+        scheduleRetry()
+    }
+
+    private func scheduleRetry() {
+        retryDelay = min(Self.maximumRetryDelay, max(1, retryDelay * 2))
+        onStatus("Safari bridge could not start; retrying in \(Int(retryDelay)) s. If this persists, quit other copies of Meeting Busy.")
+        queue.asyncAfter(deadline: .now() + retryDelay) { [weak self] in self?.restart() }
+    }
+
+    private func restart() {
+        guard !stopped, listener == nil else { return }
+        do {
+            let replacement = try makeListener()
+            listener = replacement
+            replacement.start(queue: queue)
+        } catch { scheduleRetry() }
+    }
+
+    public func stop() { queue.sync { stopped = true; listener?.cancel(); listener = nil } }
+    deinit { listener?.cancel() }
 }
 
 private final class SafariBridgeConnection: @unchecked Sendable {
@@ -239,10 +280,12 @@ private final class SafariBridgeConnection: @unchecked Sendable {
     func respond(_ code: Int) { respond(code, encoded: nil) }
     func respond(_ code: Int, encoded: Data?) {
         let body = encoded ?? Data()
-        var response = Data("HTTP/1.1 \(code) \(code == 200 ? "OK" : (code == 202 ? "Accepted" : "Error"))\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n".utf8)
+        let reasons = [200: "OK", 202: "Accepted", 204: "No Content", 400: "Bad Request", 403: "Forbidden", 413: "Payload Too Large", 503: "Service Unavailable"]
+        var headers = "HTTP/1.1 \(code) \(reasons[code] ?? "Error")\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\nCache-Control: no-store\r\n"
         if let origin = allowedOrigin {
-            response = Data("HTTP/1.1 \(code) \(code == 200 ? "OK" : (code == 202 ? "Accepted" : "Response"))\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: \(origin)\r\nAccess-Control-Allow-Methods: POST\r\nAccess-Control-Allow-Headers: Authorization, Content-Type\r\nVary: Origin\r\n\r\n".utf8)
+            headers += "Access-Control-Allow-Origin: \(origin)\r\nAccess-Control-Allow-Methods: POST\r\nAccess-Control-Allow-Headers: Authorization, Content-Type\r\nVary: Origin\r\n"
         }
+        var response = Data((headers + "\r\n").utf8)
         response.append(body)
         connection.send(content: response, completion: .contentProcessed { [self] _ in close() })
     }

@@ -3,12 +3,17 @@ import AppKit
 import MeetingDetection
 import ServiceManagement
 
+enum AppInfo {
+    static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
+    static let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+}
+
 @main
 enum MeetingBusyApp {
     @MainActor static func main() {
         if CommandLine.arguments.contains("--diagnose") {
             let trusted = AXIsProcessTrusted()
-            print("Meeting Busy \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"))")
+            print("Meeting Busy \(AppInfo.version) (build \(AppInfo.build))")
             print("Accessibility access: \(trusted ? "granted" : "denied")")
             guard trusted else { return }
             let settings = FeatureSettings()
@@ -17,11 +22,7 @@ enum MeetingBusyApp {
             if pause.isPaused { print("Automatic detection is paused; no applications were inspected."); return }
             let enabled = settings.enabledServices
             guard !enabled.isEmpty else { print("All meeting services are disabled; no applications were inspected."); return }
-            let targets = NSWorkspace.shared.runningApplications.compactMap { app -> ApplicationTarget? in
-                guard let id = app.bundleIdentifier,
-                      Detection.nativeService(bundleID: id).map({ enabled.contains($0) }) ?? AccessibilityScanner.browserIDs.contains(id) else { return nil }
-                return ApplicationTarget(pid: app.processIdentifier, bundleID: id)
-            }
+            let targets = AccessibilityScanner.runningTargets(enabledServices: enabled)
             let result = AccessibilityScanner.scan(targets, enabledServices: enabled)
             print(result.details.joined(separator: "\n"))
             for item in result.evidence { print("\(item.service.rawValue): \(item.isPresenting ? "presenting" : "in meeting")") }
@@ -44,7 +45,7 @@ enum MeetingBusyApp {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let panel = BusyPanel()
     private let appearance = AppearanceStore()
@@ -98,6 +99,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "person.crop.circle.badge.clock", accessibilityDescription: "Meeting Busy")
+        let menu = NSMenu()
+        menu.delegate = self
+        statusItem.menu = menu
         notifications.start()
         notifications.onAutomatic = { [weak self] in self?.changeMode(.automatic) }
         notifications.onOpenRelease = { [weak self] in self?.updates.openRelease() }
@@ -181,11 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateUI()
         guard !scanning else { return }
         let enabledServices = features.enabledServices
-        let targets = NSWorkspace.shared.runningApplications.compactMap { app -> ApplicationTarget? in
-            guard let id = app.bundleIdentifier,
-                  Detection.nativeService(bundleID: id).map({ enabledServices.contains($0) }) ?? AccessibilityScanner.browserIDs.contains(id) else { return nil }
-            return ApplicationTarget(pid: app.processIdentifier, bundleID: id)
-        }
+        let targets = AccessibilityScanner.runningTargets(enabledServices: enabledServices)
         // Browser-only and idle while the extension is reporting: the Accessibility scan is just a fallback, so slow it down.
         let nativeRunning = targets.contains { Detection.nativeService(bundleID: $0.bundleID) != nil }
         if !nativeRunning, tracker.evidence.isEmpty, browserBridge.connected, Date().timeIntervalSince(lastScanStarted) < 6 { return }
@@ -220,9 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.diagnostics.record(DiagnosticEntry(event: result.incomplete ? .scanFailed : .scan, evidence: self.evidence,
                                                      trusted: self.trusted, incomplete: result.incomplete,
                                                      scanMilliseconds: milliseconds, failureCodes: result.failureCodes))
-            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
-            let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
-            self.appearance.detectionDetails = "Version: \(version) (build \(build))\nApp: \(Bundle.main.bundlePath)\nAccessibility access: granted\nBrowser bridge: \(self.browserBridge.status)\n" + result.details.joined(separator: "\n")
+            self.appearance.detectionDetails = "Version: \(AppInfo.version) (build \(AppInfo.build))\nApp: \(Bundle.main.bundlePath)\nAccessibility access: granted\nBrowser bridge: \(self.browserBridge.status)\n" + result.details.joined(separator: "\n")
             self.updateUI()
         }
     }
@@ -264,8 +262,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.title = mode == .available ? " Available" : (mode == .presenting ? " Presenting" : (features.pause.isPaused ? " Paused" : ""))
         let symbol = reason == .available ? "checkmark.circle" : (reason == .paused ? "pause.circle" : (reason == .disabled ? "video.slash" : (presenting ? "rectangle.on.rectangle.slash" : (visible ? "video.fill" : "video"))))
         statusItem.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: state)
-        let menu = NSMenu()
-        let status = NSMenuItem(title: state, action: nil, keyEquivalent: "")
+    }
+
+    /// Built only when the user opens the menu, instead of on every 2-second poll.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let previewRequested = appearance.showPreview || Date() < previewUntil
+        let status = NSMenuItem(title: appearance.detectionStatus, action: nil, keyEquivalent: "")
         status.isEnabled = false
         menu.addItem(status)
         let checked = NSMenuItem(title: appearance.lastCheckDescription, action: nil, keyEquivalent: "")
@@ -347,7 +350,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         add("About & setup…", action: #selector(showWelcome), to: menu)
         add("Quit Meeting Busy", action: #selector(quit), to: menu, key: "q")
-        statusItem.menu = menu
     }
 
     @discardableResult private func add(_ title: String, action: Selector, to menu: NSMenu, key: String = "") -> NSMenuItem {
@@ -467,8 +469,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let reason = IndicatorPolicy.reason(mode: mode, evidence: evidence, trusted: trusted,
                                            preview: appearance.showPreview || Date() < previewUntil,
                                            paused: features.pause.isPaused, servicesEnabled: !features.enabledServices.isEmpty, browserConnected: browserBridge.connected)
-        let report = DetectionReport(version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development",
-                                     build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+        let report = DetectionReport(version: AppInfo.version, build: AppInfo.build,
                                      osVersion: ProcessInfo.processInfo.operatingSystemVersionString, mode: mode, reason: reason, trusted: trusted,
                                      paused: features.pause.isPaused, enabledServices: features.enabledServices, evidence: evidence,
                                      lastScanAt: [tracker.lastCompletedAt, browserBridge.lastObservedAt].compactMap { $0 }.max(), failureCodes: lastScanFailureCodes)
@@ -512,9 +513,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Meeting Busy"
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
-        alert.informativeText = "Version \(version) (build \(build))\n\nShows a red Busy box at the upper left of your main display during Webex, Teams, Google Meet, and Zoom calls.\n\nEnable Accessibility access so Meeting Busy can read meeting buttons. No microphone, camera, or screen recording access is needed.\n\nThe indicator hides when a Stop sharing, Stop Share, or Stop presenting control is detected. Before presenting, choose ‘I’m presenting’ from the menu bar for immediate hiding; return to Automatic afterward.\n\nDetection uses English and limited Spanish, French, and German controls. For inactive browser tabs, set up the optional Safari, Chromium, or Firefox extension in Settings → Browser integration. Some client versions may still hide their controls. Use Force Busy for missed calls or Available to hide a false positive."
+        alert.informativeText = "Version \(AppInfo.version) (build \(AppInfo.build))\n\nShows a red Busy box at the upper left of your main display during Webex, Teams, Google Meet, and Zoom calls.\n\nEnable Accessibility access so Meeting Busy can read meeting buttons. No microphone, camera, or screen recording access is needed.\n\nThe indicator hides when a Stop sharing, Stop Share, or Stop presenting control is detected. Before presenting, choose ‘I’m presenting’ from the menu bar for immediate hiding; return to Automatic afterward.\n\nDetection uses English and limited Spanish, French, and German controls. For inactive browser tabs, set up the optional Safari, Chromium, or Firefox extension in Settings → Browser integration. Some client versions may still hide their controls. Use Force Busy for missed calls or Available to hide a false positive."
         alert.addButton(withTitle: "Grant Accessibility access")
         alert.addButton(withTitle: "Done")
         if alert.runModal() == .alertFirstButtonReturn { grantAccess() }
