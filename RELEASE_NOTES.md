@@ -1,14 +1,15 @@
-# Meeting Busy 0.4.4
+# Meeting Busy 0.4.5
 
-Fixes missed Microsoft Teams calls when Teams exposes its window buttons but keeps its embedded meeting controls inaccessible.
+Reliability and cleanup release following a code review. No new features.
 
-- Meeting Busy now requests Teams' WebView accessibility tree before scanning. Once Teams exposes its controls, Automatic mode can detect the call on a subsequent check without restarting Teams or leaving the meeting.
-- Updated the README with the cause and recovery behavior. The app and all browser-extension packages are version 0.4.4 (app build 22).
+- Detection: the Swift detector now uses the same declared Teams/Zoom phrase lists the browser extension mirrors, and a parity test fails if a mirrored list goes unused.
+- Browser extension: a tab that was forgotten but keeps its page (same-document navigation) now reconnects and reports again.
+- Safari bridge: the local listener rebuilds itself after a failure with exponential backoff (1–60 s) instead of staying down.
+- Accessibility scans run on a dedicated queue, and Zoom's menu walk counts toward its per-app deadline.
+- The status menu is built when opened rather than on every 2-second poll.
+- The Safari extension folder is created with owner-only permissions, and the pairing prompt wording is clearer.
+- CI now also builds the release package (universal binaries, extension ZIPs, native host test, signature check).
 
-Observed live on Apple Silicon with macOS 26.6.2 and Teams 26289.204.5281.6363: before the accessibility requests, Teams exposed 40 elements, six window controls, and no meeting match. After the requests, the diagnostic found 267 elements, 32 controls, and an active Teams call; the running app logged the meeting in Automatic mode. This verifies recovery for that call, not the full meeting and sharing lifecycle.
+Includes the 0.4.4 Teams accessibility fix and earlier 0.4.x Safari pairing, indicator hide options, and Accessibility permission-prompt fixes. App and all browser-extension packages are version 0.4.5 (app build 23).
 
-Validation: 66 Swift tests, 24 browser-extension tests, and native-host/Safari-handler integration checks passed. The app, browser host, and Safari extension build for both Apple Silicon and Intel; packaged signatures and release checksums were verified.
-
-Includes the earlier 0.4.x Safari pairing, indicator hide options, and Accessibility permission-prompt fixes. Live Safari meeting and own-sharing checks remain outstanding; Intel runtime behavior and older Safari versions have not been verified. See MANUAL_TESTS.md.
-
-This is an ad hoc signed preview and is not notarized. After updating, macOS may require Accessibility approval again; repair permission only if the app reports access denied. Safari temporary extensions need pairing again after an app update.
+This is an ad hoc signed build and is not notarized. After updating, macOS may require Accessibility approval again; repair permission only if the app reports access denied. Safari temporary extensions need pairing again after an app update. Live Safari meeting and own-sharing checks, Intel runtime behavior, and older Safari versions have not been verified. See MANUAL_TESTS.md.
